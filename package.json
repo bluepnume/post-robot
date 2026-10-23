@@ -1,6 +1,6 @@
 {
     "name": "post-robot",
-    "version": "12.0.0",
+    "version": "12.0.1",
     "description": "Cross-window messaging over postMessage: send a request to a window, get a response, hand functions, promises and windows across and keep calling them.",
     "keywords": [
         "cross-domain",
