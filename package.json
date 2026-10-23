@@ -107,8 +107,8 @@
     "@krakenjs/belter": "^2.0.0",
     "@krakenjs/cross-domain-safe-weakmap": "^2.0.0",
     "@krakenjs/cross-domain-utils": "^3.0.0",
-    "@krakenjs/universal-serialize": "^2.0.0",
-    "@krakenjs/zalgo-promise": "^2.0.0"
+    "@krakenjs/zalgo-promise": "^2.0.0",
+    "sandestin": "github:bluepnume/sandestin#post-robot-port"
   },
   "lint-staged": {
     "*": "prettier --write --ignore-unknown"

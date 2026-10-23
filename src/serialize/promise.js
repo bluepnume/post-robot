@@ -1,51 +1,54 @@
 /* @flow */
 
-import {
-  type CrossDomainWindowType,
-  type DomainMatcher,
-} from "@krakenjs/cross-domain-utils/src";
+import { type DomainMatcher } from "@krakenjs/cross-domain-utils/src";
 import { ZalgoPromise } from "@krakenjs/zalgo-promise/src";
-import {
-  serializeType,
-  type CustomSerializedType,
-  type Thenable,
-} from "@krakenjs/universal-serialize/src";
 
 import { SERIALIZATION_TYPE } from "../conf";
-import type { OnType, SendType } from "../types";
 
-import { serializeFunction, type SerializedFunction } from "./function";
-import { ProxyWindow } from "./window";
+import { annotateRemoteError } from "./function";
+import type { Peer } from "./peer";
 
-export type SerializedPromise = CustomSerializedType<
-  typeof SERIALIZATION_TYPE.CROSS_DOMAIN_ZALGO_PROMISE,
-  {|
-    then: SerializedFunction,
-  |}
->;
+// The domain each promise was handed out to, checked when the other side
+// asks to watch it.
+const promiseDomains: WeakMap<Object, DomainMatcher> = new WeakMap();
 
-export function serializePromise(
-  destination: CrossDomainWindowType | ProxyWindow,
-  domain: DomainMatcher,
-  val: Thenable,
-  key: string,
-  { on, send }: {| on: OnType, send: SendType |}
-): SerializedPromise {
-  return serializeType(SERIALIZATION_TYPE.CROSS_DOMAIN_ZALGO_PROMISE, {
-    then: serializeFunction(
-      destination,
-      domain,
-      (resolve, reject) => val.then(resolve, reject),
-      key,
-      { on, send }
-    ),
-  });
+export function getPromiseDomain(promise: Object): ?DomainMatcher {
+  return promiseDomains.get(promise);
 }
 
-export function deserializePromise<T>(
-  source: CrossDomainWindowType | ProxyWindow,
-  origin: string,
-  { then }: {| then: Function |}
-): ZalgoPromise<T> {
-  return new ZalgoPromise(then);
+/* eslint-disable promise/no-native, no-restricted-globals, compat/compat */
+
+export function getPromiseType(peer: Peer): {|
+  name: string,
+  test: (mixed) => boolean,
+  encode: ({| value: Object |}) => Promise<mixed>,
+  decode: ({| value: Promise<mixed> |}) => ZalgoPromise<mixed>,
+|} {
+  return {
+    name: SERIALIZATION_TYPE.CROSS_DOMAIN_ZALGO_PROMISE,
+
+    test: (value) => value instanceof ZalgoPromise || value instanceof Promise,
+
+    // sandestin carries native promises; a ZalgoPromise is adopted into one.
+    encode: ({ value }) => {
+      const promise =
+        value instanceof ZalgoPromise
+          ? new Promise((resolve, reject) => value.then(resolve, reject))
+          : value;
+
+      promiseDomains.set(promise, peer.getDomain());
+      return promise;
+    },
+
+    decode: ({ value }) => {
+      return new ZalgoPromise((resolve, reject) => {
+        value.then(resolve, (err) => {
+          annotateRemoteError(err, "then", []);
+          reject(err);
+        });
+      });
+    },
+  };
 }
+
+/* eslint-enable promise/no-native, no-restricted-globals, compat/compat */

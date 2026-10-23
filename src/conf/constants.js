@@ -15,6 +15,8 @@ export const MESSAGE_NAME = {
   METHOD: ("postrobot_method": "postrobot_method"),
   HELLO: ("postrobot_hello": "postrobot_hello"),
   OPEN_TUNNEL: ("postrobot_open_tunnel": "postrobot_open_tunnel"),
+  RELEASE: ("postrobot_release": "postrobot_release"),
+  WATCH: ("postrobot_watch": "postrobot_watch"),
 };
 
 export const SEND_STRATEGY = {

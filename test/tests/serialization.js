@@ -148,6 +148,143 @@ describe("Serialization cases", () => {
       });
   });
 
+  it("should call a function with the calling window and its origin as this", () => {
+    const { childFrame } = getWindows();
+
+    const myfunction = function myfunction(): {|
+      sourceIsChild: boolean,
+      origin: string,
+    |} {
+      return {
+        // $FlowFixMe[object-this-reference]
+        sourceIsChild: this.source === childFrame,
+        // $FlowFixMe[object-this-reference]
+        origin: this.origin,
+      };
+    };
+
+    return send(childFrame, "callFunction", { fn: myfunction, args: [] }).then(
+      ({ data }) => {
+        if (data.sourceIsChild !== true) {
+          throw new Error(`Expected this.source to be the child frame`);
+        }
+
+        if (typeof data.origin !== "string" || !data.origin) {
+          throw new Error(`Expected this.origin to be a domain string`);
+        }
+      }
+    );
+  });
+
+  it("should call a function with fireAndForget and not wait for its result", () => {
+    const { childFrame } = getWindows();
+
+    let called = false;
+
+    const myfunction = () => {
+      called = true;
+      return new ZalgoPromise(() => {
+        // never resolves
+      });
+    };
+
+    return send(childFrame, "callFunction", {
+      fn: myfunction,
+      args: [],
+      fireAndForget: true,
+    }).then(() => {
+      if (!called) {
+        throw new Error(`Expected function to have been called`);
+      }
+    });
+  });
+
+  it("should pass a function that returns a function, and call the result", () => {
+    const { childFrame } = getWindows();
+
+    const inner = (val) => val + 1;
+    const outer = () => inner;
+
+    return send(childFrame, "callFunction", { fn: outer, args: [] })
+      .then(({ data }) => {
+        if (typeof data !== "function") {
+          throw new TypeError(`Expected a function back, got ${typeof data}`);
+        }
+
+        return data(1);
+      })
+      .then((result) => {
+        if (result !== 2) {
+          throw new Error(`Expected inner function to return 2, got ${result}`);
+        }
+      });
+  });
+
+  it("should relay a function from one child window to another through the parent", () => {
+    const { childFrame, otherChildFrame } = getWindows();
+
+    return send(childFrame, "provideFunction")
+      .then(({ data }) => {
+        // The function lives in childFrame; hand it to otherChildFrame and
+        // have that window call it. The call comes back through here.
+        return send(otherChildFrame, "callFunction", {
+          fn: data.myfunction,
+          args: [21],
+        });
+      })
+      .then(({ data }) => {
+        if (data !== 42) {
+          throw new Error(
+            `Expected relayed function to return 42, got ${data}`
+          );
+        }
+      });
+  });
+
+  it("should pass dates, undefined, nested arrays and objects across windows", () => {
+    const { childFrame } = getWindows();
+
+    const when = new Date("2026-01-02T03:04:05.000Z");
+
+    return send(childFrame, "setupListener", {
+      messageName: "foo",
+      data: {
+        when,
+        gap: undefined,
+        list: [1, "two", null, { three: 3 }],
+        nested: { deep: { deeper: true } },
+      },
+    })
+      .then(() => {
+        return send(childFrame, "foo");
+      })
+      .then(({ data }) => {
+        if (
+          !(data.when instanceof Date) ||
+          data.when.getTime() !== when.getTime()
+        ) {
+          throw new Error(`Expected date to survive, got ${String(data.when)}`);
+        }
+
+        if (!("gap" in data) || data.gap !== undefined) {
+          throw new Error(`Expected undefined to survive`);
+        }
+
+        if (
+          JSON.stringify(data.list) !==
+          JSON.stringify([1, "two", null, { three: 3 }])
+        ) {
+          throw new Error(
+            `Expected list to survive, got ${JSON.stringify(data.list)}`
+          );
+        }
+
+        if (data.nested.deep.deeper !== true) {
+          throw new Error(`Expected nested object to survive`);
+        }
+      });
+  });
+
   it("should pass a promise across windows and be able to call it later", () => {
     const { childFrame } = getWindows();
 

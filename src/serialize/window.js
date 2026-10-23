@@ -6,7 +6,6 @@ import {
   isWindowClosed,
   type CrossDomainWindowType,
   closeWindow,
-  type DomainMatcher,
   getOpener,
   WINDOW_TYPE,
   isWindow,
@@ -20,10 +19,6 @@ import {
   noop,
   submitForm,
 } from "@krakenjs/belter/src";
-import {
-  serializeType,
-  type CustomSerializedType,
-} from "@krakenjs/universal-serialize/src";
 
 import { SERIALIZATION_TYPE, METHOD } from "../conf";
 import { windowStore, globalStore } from "../global";
@@ -387,28 +382,21 @@ export class ProxyWindow {
   }
 }
 
-export type SerializedWindow = CustomSerializedType<
-  typeof SERIALIZATION_TYPE.CROSS_DOMAIN_WINDOW,
-  SerializedWindowType
->;
-
-export function serializeWindow(
-  destination: CrossDomainWindowType | ProxyWindow,
-  domain: DomainMatcher,
-  win: CrossDomainWindowType,
-  { send }: {| send: SendType |}
-): SerializedWindow {
-  return serializeType(
-    SERIALIZATION_TYPE.CROSS_DOMAIN_WINDOW,
-    ProxyWindow.serialize(win, { send })
-  );
-}
-
-export function deserializeWindow(
-  source: CrossDomainWindowType | ProxyWindow,
-  origin: string,
-  win: SerializedWindowType,
-  { send }: {| send: SendType |}
-): ProxyWindow {
-  return ProxyWindow.deserialize(win, { send });
+// Windows cross by reference: the other side gets an object of functions
+// that act on the window here, and rebuilds a ProxyWindow around them.
+export function getWindowType({ send }: {| send: SendType |}): {|
+  name: string,
+  test: (mixed) => boolean,
+  encode: ({|
+    value: CrossDomainWindowType | ProxyWindow,
+  |}) => SerializedWindowType,
+  decode: ({| value: SerializedWindowType |}) => ProxyWindow,
+|} {
+  return {
+    name: SERIALIZATION_TYPE.CROSS_DOMAIN_WINDOW,
+    // $FlowFixMe
+    test: (value) => isWindow(value) || ProxyWindow.isProxyWindow(value),
+    encode: ({ value }) => ProxyWindow.serialize(value, { send }),
+    decode: ({ value }) => ProxyWindow.deserialize(value, { send }),
+  };
 }
