@@ -60,6 +60,7 @@
     },
     "devDependencies": {
         "cugel-scripts": "^0.1.0",
-        "esbuild": "^0.28.0"
+        "esbuild": "^0.28.0",
+        "post-robot-previous": "npm:post-robot@^12.0.0"
     }
 }

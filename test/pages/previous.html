@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>post-robot, previous release</title></head>
+<body>
+<script>
+    window.__errors = [];
+    window.addEventListener('error', function (event) { window.__errors.push(String(event.message || event.error)); });
+</script>
+<script src="/node_modules/post-robot-previous/dist/post-robot.min.js"></script>
+<script>
+    // The previously published version of this major, answering the suite
+    // the way test/child.ts does for the current code.
+    postRobot.setup();
+    postRobot.on('echo', function (event) { return event.data; });
+    postRobot.on('whichVersion', function () { return { global: Object.keys(window).filter(function (key) { return key.indexOf('__post_robot_') === 0; }) }; });
+    postRobot.on('sendMessageToParent', function (event) {
+        return postRobot.send(window.parent, event.data.messageName, event.data.data).then(function (reply) { return reply.data; });
+    });
+    postRobot.on('callFunction', function (event) { return event.data.fn.apply(null, event.data.args); });
+</script>
+</body>
+</html>
