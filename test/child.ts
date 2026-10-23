@@ -74,3 +74,9 @@ on('whoAmI', () => ({ href: location.href }));
 on('throwError', () => {
     throw new Error('child says no');
 });
+
+// Keep a function the other side handed us where a same-origin window can
+// read it directly, as zoid's getSiblings does with another frame's xprops.
+on('storeFunction', ({ data }) => {
+    (window as Window & { storedFunction ?: unknown }).storedFunction = (data as { fn : unknown }).fn;
+});

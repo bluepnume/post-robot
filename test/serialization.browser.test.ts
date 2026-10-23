@@ -172,6 +172,21 @@ describe('lifetime', () => {
     });
 });
 
+describe('wrappers from another window', () => {
+    it('sends on a function wrapper read straight off a same-origin frame', async () => {
+        const { childFrame, otherChildFrame } = getWindows();
+
+        await send(childFrame, 'storeFunction', { fn: (value : number) => value * 2 });
+
+        // A wrapper made by the child's copy of post-robot, holding the child's ref.
+        const wrapper = (childFrame as Window & { storedFunction ?: Fn }).storedFunction;
+
+        const { data } = await send(otherChildFrame, 'callFunction', { fn: wrapper, args: [ 21 ] }) as Data<number>;
+
+        expect(data).toBe(42);
+    });
+});
+
 describe('origin binding', () => {
     it('refuses a call for a function from an origin it was not handed to', async () => {
         const { childFrame } = getWindows();
