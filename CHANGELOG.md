@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [12.2.0](https://github.com/bluepnume/post-robot/compare/v12.1.0...v12.2.0) (2026-10-23)
+
+* sandestin 0.5.0: a function sent to the same window twice is one proxy there, and a release says how many sends it covers, so collecting one copy no longer breaks another still in use. Peers on 12.1 and earlier send no count, which releases outright as before
+* a function handed back to the window it came from is called as a local call, with `this` naming this window
+* a call for a function handed to a proxy window finds it before that window is known on this side
+* `serializeMessage` and `deserializeMessage` work as the first post-robot call on a page
+
 ## [12.1.0](https://github.com/bluepnume/post-robot/compare/v12.0.1...v12.1.0) (2026-10-23)
 
 * sandestin 0.4.0: the serializer's core no longer carries every type; post-robot registers `Date` and `RegExp` and nothing else beyond plain data, functions, promises and windows. `Map`, `Set`, `bigint` and typed arrays no longer cross (12.0 carried them by accident of the old core); the bundle is smaller for it

@@ -79,8 +79,10 @@ const createPeer = (win : Window | ProxyWindow, { send } : Pick<Transport, 'send
                 : native(send(win, MESSAGE_NAME.METHOD, { handle, args }, { domain, fireAndForget: true }).then(noop));
         },
 
-        releaseRemoteHandle: ({ handle, context }) => {
-            send(win, MESSAGE_NAME.RELEASE, { handle }, { domain: domainOf(context), fireAndForget: true }).catch(noop);
+        releaseRemoteHandle: ({ handle, context, count }) => {
+            const options = { domain: domainOf(context), fireAndForget: true };
+
+            send(win, MESSAGE_NAME.RELEASE, { handle, count }, options).catch(noop);
         },
 
         watchRemotePromise: ({ handle, context }) => native(
@@ -112,11 +114,7 @@ export const getPeer = (winOrProxyWin : Window | ProxyWindow, { send } : Pick<Tr
         win.awaitWindow().then(actualWin => {
             unresolvedProxyPeers.delete(peer);
 
-            const list = peers.getOrSet(actualWin, () => []);
-
-            if (!list.includes(peer)) {
-                list.push(peer);
-            }
+            peers.getOrSet(actualWin, () => []).push(peer);
         });
 
         return peer;
@@ -148,7 +146,7 @@ type GetPeerForHandleOptions = {
 const getPeerForHandle = ({ source, handle, send } : GetPeerForHandleOptions) : Peer => {
     const first = getPeer(source, { send });
 
-    const peers = windowStore<Array<Peer>>('sandestinPeers').get(source) ?? [];
+    const peers = windowStore<Array<Peer>>('sandestinPeers').getOrSet(source, () => []);
 
     return peers.find(peer => peer.serdes.hasHandle({ handle })) ??
         [ ...unresolvedProxyPeers ].find(peer => peer.serdes.hasHandle({ handle })) ??
@@ -158,6 +156,9 @@ const getPeerForHandle = ({ source, handle, send } : GetPeerForHandleOptions) : 
 type HandleRequest = {
     readonly handle : string,
     readonly args ?: unknown,
+    // On a release: how many sends of the handle the other side let go of.
+    // post-robot 12.1 and earlier leave it out, which releases outright.
+    readonly count ?: number,
 };
 
 // The three inbound requests the other side can make about what we handed
@@ -175,10 +176,11 @@ export const listenForPeerRequests = ({ on, send } : Transport) : Cancelable =>
         });
 
         const release = on(MESSAGE_NAME.RELEASE, { domain: WILDCARD }, ({ source, origin, data }) => {
-            const { handle } = data as HandleRequest;
+            const { handle, count } = data as HandleRequest;
 
             return getPeerForHandle({ source, handle, send }).serdes.releaseLocalHandle({
                 handle,
+                count,
                 context: { source, origin }
             }).catch(noop);
         });
