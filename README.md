@@ -40,7 +40,7 @@ ES modules, TypeScript types included, ES2019 syntax. For current browsers (Chro
 
 ## What crosses
 
-Data crosses by value, through [sandestin](https://github.com/bluepnume/sandestin): objects, arrays, strings, numbers, dates, maps, sets, typed arrays, `undefined`, cycles, and errors with their name, message, code and stack. Three things cross by reference:
+Data crosses by value, through [sandestin](https://github.com/bluepnume/sandestin): objects, arrays, strings, numbers, booleans, `null`, `undefined`, dates, regular expressions, cycles, and errors with their name, message, code and stack. Anything else (a `Map`, a class instance) is passed through as plain data. Three things cross by reference:
 
 - **Functions.** The other side gets a function that calls the original where it lives and resolves with its result. It has `.fireAndForget(...)` for a call that needs no reply. Inside the original, `this.source` and `this.origin` are the calling window and its origin. A function handed back to the window it came from is the original again, called directly.
 - **Promises.** Native promises and [ZalgoPromises](https://github.com/bluepnume/zalgo-promise) both cross; the other side gets a promise that settles when the original does.

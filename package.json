@@ -1,6 +1,6 @@
 {
     "name": "post-robot",
-    "version": "12.0.1",
+    "version": "12.1.0",
     "description": "Cross-window messaging over postMessage: send a request to a window, get a response, hand functions, promises and windows across and keep calling them.",
     "keywords": [
         "cross-domain",
@@ -55,7 +55,7 @@
     },
     "dependencies": {
         "cross-domain-utils": "^4.0.0",
-        "sandestin": "^0.3.0",
+        "sandestin": "^0.4.0",
         "zalgo-promise": "^3.0.0"
     },
     "devDependencies": {

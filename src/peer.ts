@@ -2,7 +2,7 @@ import type { DomainMatcher } from 'cross-domain-utils';
 import type { Outcome, Sandestin } from 'sandestin';
 
 import { matchDomain } from 'cross-domain-utils';
-import { sandestin } from 'sandestin';
+import { dateType, regExpType, sandestin } from 'sandestin';
 
 import { MESSAGE_NAME, WILDCARD } from './constants';
 
@@ -46,7 +46,10 @@ const domainOf = (context : PeerContext | undefined) : DomainMatcher => assertEx
 const createPeer = (win : Window | ProxyWindow, { send } : Pick<Transport, 'send'>) : Peer => {
     const serdes = sandestin<PeerContext>({
         includeStacks: true,
-        types:         [ getWindowCustomType({ send }), functionType, promiseType ],
+        // Dates and RegExps (domain matchers in props) cross; nothing else
+        // beyond JSON, functions, promises and windows does, which keeps the
+        // bundle to what post-robot uses.
+        types:         [ getWindowCustomType({ send }), functionType, promiseType, dateType, regExpType ],
 
         authorizeInboundRequest: ({ context, handleContext }) => {
             if (handleContext && !matchDomain(handleContext.origin, context.origin)) {

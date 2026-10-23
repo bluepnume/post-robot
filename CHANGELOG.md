@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [12.1.0](https://github.com/bluepnume/post-robot/compare/v12.0.1...v12.1.0) (2026-10-23)
+
+* sandestin 0.4.0: the serializer's core no longer carries every type; post-robot registers `Date` and `RegExp` and nothing else beyond plain data, functions, promises and windows. `Map`, `Set`, `bigint` and typed arrays no longer cross (12.0 carried them by accident of the old core); the bundle is smaller for it
+
 ## [12.0.0](https://github.com/bluepnume/post-robot/compare/v11.0.1...v12.0.0) (2026-10-22)
 
 ### ⚠ BREAKING CHANGES
