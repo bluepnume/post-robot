@@ -1,106 +1,29 @@
 /* @flow */
 
-import {
-  type CrossDomainWindowType,
-  type DomainMatcher,
-} from "@krakenjs/cross-domain-utils/src";
 import { ZalgoPromise } from "@krakenjs/zalgo-promise/src";
-import { noop, arrayFrom } from "@krakenjs/belter/src";
+import { noop } from "@krakenjs/belter/src";
 import { isRef } from "sandestin";
 
 import { SERIALIZATION_TYPE } from "../conf";
 import type { CrossDomainFunctionType } from "../types";
 
-import type { ProxyWindow } from "./window";
-import type { Peer } from "./peer";
-
-// The domain each function was handed out to, checked when a call for it
-// comes back in.
-const functionDomains: WeakMap<Function, DomainMatcher> = new WeakMap();
-
-export function getFunctionDomain(fn: Function): ?DomainMatcher {
-  return functionDomains.get(fn);
-}
-
-function stringifyArguments(args: $ReadOnlyArray<mixed> = []): string {
-  return arrayFrom(args)
-    .map((arg) => {
-      if (typeof arg === "string") {
-        return `'${arg}'`;
-      }
-      if (arg === undefined) {
-        return "undefined";
-      }
-      if (arg === null) {
-        return "null";
-      }
-      if (typeof arg === "boolean") {
-        return arg.toString();
-      }
-      if (Array.isArray(arg)) {
-        return "[ ... ]";
-      }
-      if (typeof arg === "object") {
-        return "{ ... }";
-      }
-      if (typeof arg === "function") {
-        return "() => { ... }";
-      }
-      return `<${typeof arg}>`;
-    })
-    .join(", ");
-}
-
-// An error that crossed back from the other side carries its original stack
-// as `remoteStack`; surface it the way post-robot always has.
-export function annotateRemoteError(
-  err: mixed,
-  name: string,
-  args: $ReadOnlyArray<mixed>
-) {
-  if (
-    err &&
-    typeof err === "object" &&
-    typeof err.remoteStack === "string" &&
-    typeof err.stack === "string"
-  ) {
-    const remoteStack: string = err.remoteStack;
-    const localStack: string = err.stack;
-    const call = `${name}(${stringifyArguments(args)})`;
-
-    // $FlowFixMe
-    err.stack = `Remote call to ${call} failed\n\n${remoteStack}\n\n${localStack}`;
-  }
-}
+import type { PeerContext } from "./peer";
 
 // eslint-disable-next-line flowtype/no-weak-types
 type Ref = any;
 
 function wrapRemoteFunction<A: $ReadOnlyArray<mixed>, R>(
   ref: Ref,
-  {
-    source,
-    origin,
-  }: {| source: CrossDomainWindowType | ProxyWindow, origin: string |}
+  { source, origin }: PeerContext
 ): CrossDomainFunctionType<A, R> {
   const name: string = ref.name;
 
-  const invoke = (args: $ReadOnlyArray<mixed>): ZalgoPromise<R> =>
-    ZalgoPromise.resolve(ref.invoke({ args }));
-
   function crossDomainFunctionWrapper(...args: A): ZalgoPromise<R> {
-    return invoke(args).catch((err) => {
-      annotateRemoteError(err, name, args);
-      throw err;
-    });
+    return ZalgoPromise.resolve(ref.invoke({ args }));
   }
 
-  crossDomainFunctionWrapper.fireAndForget = (
-    ...args: A
-  ): ZalgoPromise<void> => {
-    invoke(args).catch(noop);
-    return ZalgoPromise.resolve();
-  };
+  crossDomainFunctionWrapper.fireAndForget = (...args: A): ZalgoPromise<void> =>
+    ZalgoPromise.resolve(ref.invoke({ args, reply: false }));
 
   crossDomainFunctionWrapper.__name__ = name;
   crossDomainFunctionWrapper.__origin__ = origin;
@@ -118,10 +41,7 @@ function wrapRemoteFunction<A: $ReadOnlyArray<mixed>, R>(
 // it here, the way the other side would have.
 function wrapLocalFunction<A: $ReadOnlyArray<mixed>, R>(
   fn: Function,
-  {
-    source,
-    origin,
-  }: {| source: CrossDomainWindowType | ProxyWindow, origin: string |}
+  { source, origin }: PeerContext
 ): CrossDomainFunctionType<A, R> {
   const call = (args: $ReadOnlyArray<mixed>): ZalgoPromise<R> =>
     ZalgoPromise.try(() => (fn.apply({ source, origin }, args): R));
@@ -130,7 +50,7 @@ function wrapLocalFunction<A: $ReadOnlyArray<mixed>, R>(
     return call(args);
   }
 
-  localFunctionWrapper.fireAndForget = (...args: A) => {
+  localFunctionWrapper.fireAndForget = (...args: A): ZalgoPromise<void> => {
     call(args).catch(noop);
     return ZalgoPromise.resolve();
   };
@@ -145,38 +65,29 @@ function wrapLocalFunction<A: $ReadOnlyArray<mixed>, R>(
   return localFunctionWrapper;
 }
 
-// Each peer gets its own copy, bound to the window it talks to; that is how
-// a function encoded for a result or an argument, where no message is being
-// serialized, still knows which window it is for.
-export function getFunctionType(peer: Peer): {|
-  name: string,
-  test: (mixed) => boolean,
-  encode: ({| value: Function |}) => Function,
-  decode: ({| value: Ref |}) => CrossDomainFunctionType<*, *>,
-|} {
-  return {
-    name: SERIALIZATION_TYPE.CROSS_DOMAIN_FUNCTION,
+// The function itself goes across as a sandestin handle, bound to the
+// context of the message that carried it. A wrapper around a remote function
+// is unwrapped first, so sandestin can see where it came from: sent back to
+// its owner it becomes the original again, sent on to a third window it is
+// relayed.
+export const functionType = {
+  name: SERIALIZATION_TYPE.CROSS_DOMAIN_FUNCTION,
 
-    test: (value) => typeof value === "function",
+  test: (value: mixed): boolean => typeof value === "function",
 
-    // The function itself goes across as a sandestin handle; all this adds
-    // is the record of which domain it was given to. A wrapper around a
-    // remote function is unwrapped first, so sandestin can see where it came
-    // from: sent back to its owner it becomes the original again, sent on
-    // to a third window it is relayed.
-    encode: ({ value }) => {
-      functionDomains.set(value, peer.getDomain());
-      // $FlowFixMe
-      return value.__ref__ || value;
-    },
+  // $FlowFixMe
+  encode: ({ value }: {| value: Function |}): Function =>
+    value.__ref__ || value,
 
-    decode: ({ value }) => {
-      const source = peer.win;
-      const origin = peer.getDomain();
-
-      return isRef(value)
-        ? wrapRemoteFunction(value, { source, origin })
-        : wrapLocalFunction(value, { source, origin });
-    },
-  };
-}
+  decode: ({
+    value,
+    context,
+  }: {|
+    value: Ref,
+    context: PeerContext,
+  |}): CrossDomainFunctionType<*, *> => {
+    return isRef(value)
+      ? wrapRemoteFunction(value, context)
+      : wrapLocalFunction(value, context);
+  },
+};

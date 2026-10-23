@@ -1,5 +1,5 @@
 {
-  "name": "@krakenjs/post-robot",
+  "name": "post-robot",
   "version": "11.0.1",
   "description": "Simple postMessage based server.",
   "main": "index.js",
@@ -108,7 +108,7 @@
     "@krakenjs/cross-domain-safe-weakmap": "^2.0.0",
     "@krakenjs/cross-domain-utils": "^3.0.0",
     "@krakenjs/zalgo-promise": "^2.0.0",
-    "sandestin": "github:bluepnume/sandestin#post-robot-port"
+    "sandestin": "^0.3.0"
   },
   "lint-staged": {
     "*": "prettier --write --ignore-unknown"

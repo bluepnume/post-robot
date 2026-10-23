@@ -1,9 +1,11 @@
 /* @flow */
 
 import { sandestin } from "sandestin";
+import type { ZalgoPromise } from "@krakenjs/zalgo-promise/src";
 import {
   matchDomain,
   type CrossDomainWindowType,
+  type DomainMatcher,
 } from "@krakenjs/cross-domain-utils/src";
 import { noop } from "@krakenjs/belter/src";
 
@@ -12,19 +14,24 @@ import { windowStore, globalStore } from "../global";
 import type { OnType, SendType, CancelableType } from "../types";
 
 import { ProxyWindow, getWindowType } from "./window";
-import { getFunctionType, getFunctionDomain } from "./function";
-import { getPromiseType, getPromiseDomain } from "./promise";
+import { functionType } from "./function";
+import { promiseType } from "./promise";
+
+// What every encode and decode is tagged with: the window on the other end
+// and the domain it was addressed at (outbound) or seen from (inbound). It is
+// also the `this` of every function the other side calls, so it keeps the
+// `source` / `origin` names post-robot handlers have always read. sandestin
+// carries it with every function and promise, so a call for one can be
+// checked against where it was handed out.
+export type PeerContext = {|
+  source: CrossDomainWindowType | ProxyWindow,
+  origin: DomainMatcher,
+|};
 
 // One sandestin instance per window we talk to. It holds the functions and
 // promises we have handed that window, and the refs we hold from it.
 export type Peer = {|
   win: CrossDomainWindowType | ProxyWindow,
-  // The origin the window was last heard from, else the domain we last
-  // addressed it at. Functions handed over are bound to it, and calls back
-  // to the window go there.
-  origin: ?string,
-  domain: ?string,
-  getDomain: () => string,
   // eslint-disable-next-line flowtype/no-weak-types
   serdes: any,
 |};
@@ -33,39 +40,31 @@ const proxyPeers: WeakMap<ProxyWindow, Peer> = new WeakMap();
 
 /* eslint-disable promise/no-native, no-restricted-globals, compat/compat */
 
+// A ZalgoPromise as a native one, which is what sandestin's hooks return.
+function native<T>(promise: ZalgoPromise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    promise.then(resolve, reject);
+  });
+}
+
 function createPeer(
   win: CrossDomainWindowType | ProxyWindow,
   { send }: {| send: SendType |}
 ): Peer {
-  const peer: Peer = {
-    win,
-    origin: null,
-    domain: null,
-    getDomain: () => peer.origin || peer.domain || WILDCARD,
-    serdes: null,
+  const domainOf = (context: ?PeerContext): DomainMatcher => {
+    return context ? context.origin : WILDCARD;
   };
-
-  const domain = peer.getDomain;
 
   const serdes = sandestin({
     includeStacks: true,
-    types: [
-      getWindowType({ send }),
-      getFunctionType(peer),
-      getPromiseType(peer),
-    ],
+    types: [getWindowType({ send }), functionType, promiseType],
 
-    authorizeInboundRequest: ({ context, target }) => {
-      const expectedDomain =
-        typeof target === "function"
-          ? getFunctionDomain(target)
-          : getPromiseDomain(target);
-
-      if (expectedDomain && !matchDomain(expectedDomain, context.origin)) {
+    authorizeInboundRequest: ({ context, handleContext }) => {
+      if (handleContext && !matchDomain(handleContext.origin, context.origin)) {
         return false;
       }
 
-      const actual = ProxyWindow.unwrap(peer.win);
+      const actual = ProxyWindow.unwrap(win);
 
       if (ProxyWindow.isProxyWindow(actual)) {
         // $FlowFixMe
@@ -75,33 +74,48 @@ function createPeer(
       return actual === context.source;
     },
 
-    invokeRemoteFunction: ({ handle, args }) =>
-      new Promise((resolve, reject) => {
-        send(win, MESSAGE_NAME.METHOD, { handle, args }, { domain: domain() })
-          .then(({ data }) => resolve(data))
-          .catch(reject);
-      }),
+    invokeRemoteFunction: ({ handle, args, reply, context }) => {
+      const domain = domainOf(context);
 
-    releaseRemoteHandle: ({ handle }) => {
+      if (!reply) {
+        return native(
+          send(
+            win,
+            MESSAGE_NAME.METHOD,
+            { handle, args },
+            { domain, fireAndForget: true }
+          )
+        );
+      }
+
+      return native(
+        send(win, MESSAGE_NAME.METHOD, { handle, args }, { domain }).then(
+          ({ data }) => data
+        )
+      );
+    },
+
+    releaseRemoteHandle: ({ handle, context }) => {
       send(
         win,
         MESSAGE_NAME.RELEASE,
         { handle },
-        { domain: domain(), fireAndForget: true }
+        { domain: domainOf(context), fireAndForget: true }
       ).catch(noop);
     },
 
-    watchRemotePromise: ({ handle, listener }) => {
-      send(win, MESSAGE_NAME.WATCH, { handle }, { domain: domain() }).then(
-        ({ data }) => listener(data),
-        (err) =>
-          listener({ ok: false, error: peer.serdes.encode({ value: err }) })
-      );
-    },
+    watchRemotePromise: ({ handle, context }) =>
+      native(
+        send(
+          win,
+          MESSAGE_NAME.WATCH,
+          { handle },
+          { domain: domainOf(context) }
+        ).then(({ data }) => data)
+      ),
   });
 
-  peer.serdes = serdes;
-  return peer;
+  return { win, serdes };
 }
 
 export function getPeer(
@@ -124,10 +138,11 @@ export function getPeer(
     proxyPeers.set(proxyWin, peer);
 
     // Once the real window is known, calls coming back from it must find
-    // this peer, unless the window already has one of its own.
+    // this peer as well as any the window already has.
     proxyWin.awaitWindow().then((actualWin) => {
-      if (!peers.has(actualWin)) {
-        peers.set(actualWin, peer);
+      const list = peers.getOrSet(actualWin, () => []);
+      if (list.indexOf(peer) === -1) {
+        list.push(peer);
       }
     });
 
@@ -136,12 +151,36 @@ export function getPeer(
 
   // $FlowFixMe
   const actualWin: CrossDomainWindowType = win;
-  return peers.getOrSet(actualWin, () => createPeer(actualWin, { send }));
+  const list = peers.getOrSet(actualWin, () => []);
+
+  if (!list.length) {
+    list.push(createPeer(actualWin, { send }));
+  }
+
+  return list[0];
+}
+
+// The peer for a window that holds the handle a request names: usually the
+// window's own, but a function handed to a proxy before its window was known
+// lives in the proxy's peer.
+function getPeerForHandle(
+  source: CrossDomainWindowType,
+  handle: string,
+  { send }: {| send: SendType |}
+): Peer {
+  const first = getPeer(source, { send });
+
+  for (const peer of windowStore("sandestinPeers").get(source, [])) {
+    if (peer.serdes.hasHandle({ handle })) {
+      return peer;
+    }
+  }
+
+  return first;
 }
 
 // The three inbound requests the other side can make about what we handed
-// it: call a function, drop a handle, or ask for a promise's outcome. Each
-// is answered by the peer for the window that sent it.
+// it: call a function, drop a handle, or ask for a promise's outcome.
 export function listenForPeerRequests({
   on,
   send,
@@ -150,13 +189,13 @@ export function listenForPeerRequests({
   send: SendType,
 |}): CancelableType {
   return globalStore("builtinListeners").getOrSet("sandestin", () => {
-    const peerFor = (source) => getPeer(source, { send });
-
     const method = on(
       MESSAGE_NAME.METHOD,
       { domain: WILDCARD },
       ({ source, origin, data }) =>
-        peerFor(source).serdes.invokeLocalFunction({
+        getPeerForHandle(source, data.handle, {
+          send,
+        }).serdes.invokeLocalFunction({
           handle: data.handle,
           args: data.args,
           context: { source, origin },
@@ -167,7 +206,7 @@ export function listenForPeerRequests({
       MESSAGE_NAME.RELEASE,
       { domain: WILDCARD },
       ({ source, origin, data }) =>
-        peerFor(source)
+        getPeerForHandle(source, data.handle, { send })
           .serdes.releaseLocalHandle({
             handle: data.handle,
             context: { source, origin },
@@ -179,18 +218,11 @@ export function listenForPeerRequests({
       MESSAGE_NAME.WATCH,
       { domain: WILDCARD },
       ({ source, origin, data }) =>
-        new Promise((resolve) => {
-          const { serdes } = peerFor(source);
-
-          serdes
-            .watchLocalPromise({
-              handle: data.handle,
-              listener: resolve,
-              context: { source, origin },
-            })
-            .catch((err) =>
-              resolve({ ok: false, error: serdes.encode({ value: err }) })
-            );
+        getPeerForHandle(source, data.handle, {
+          send,
+        }).serdes.watchLocalPromise({
+          handle: data.handle,
+          context: { source, origin },
         })
     );
 

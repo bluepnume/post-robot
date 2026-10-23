@@ -18,13 +18,10 @@ export function serializeMessage<T: mixed>(
 ): string {
   listenForPeerRequests({ on, send });
 
-  const peer = getPeer(destination, { send });
-
-  if (typeof domain === "string") {
-    peer.domain = domain;
-  }
-
-  return peer.serdes.encodeJSON({ value: obj });
+  return getPeer(destination, { send }).serdes.encodeJSON({
+    value: obj,
+    context: { source: destination, origin: domain },
+  });
 }
 
 export function deserializeMessage<T: mixed>(
@@ -35,8 +32,8 @@ export function deserializeMessage<T: mixed>(
 ): T {
   listenForPeerRequests({ on, send });
 
-  const peer = getPeer(source, { send });
-  peer.origin = origin;
-
-  return peer.serdes.decodeJSON({ text: message });
+  return getPeer(source, { send }).serdes.decodeJSON({
+    text: message,
+    context: { source, origin },
+  });
 }
