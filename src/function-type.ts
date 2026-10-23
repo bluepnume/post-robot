@@ -1,5 +1,6 @@
 import type { CustomType, Ref } from 'sandestin';
 
+import { getDomain } from 'cross-domain-utils';
 import { isRef } from 'sandestin';
 import { ZalgoPromise } from 'zalgo-promise';
 
@@ -34,9 +35,12 @@ const wrapRemoteFunction = (ref : Ref, { source, origin } : PeerContext) : Cross
 };
 
 // One of our own functions, handed to another window and handed back: call
-// it here, the way the other side would have.
+// it here, directly. The call is local, so `this` names this window, as it
+// did in post-robot 11; the wrapper still records where it came back from.
 const wrapLocalFunction = (fn : AnyFunction, { source, origin } : PeerContext) : CrossDomainFunctionType => {
-    const call = (args : AnyArgs) : ZalgoPromise => ZalgoPromise.try(() => fn.apply({ source, origin }, [ ...args ]));
+    const call = (args : AnyArgs) : ZalgoPromise =>
+        ZalgoPromise.try(() => fn.apply({ source: window, origin: getDomain() }, [ ...args ]));
+
     const wrapper = (...args : AnyArgs) : ZalgoPromise => call(args);
 
     Object.defineProperty(wrapper, 'name', { value: fn.name });

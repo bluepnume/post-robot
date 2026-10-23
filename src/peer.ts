@@ -34,6 +34,12 @@ type Peer = {
 
 const proxyPeers = new WeakMap<ProxyWindow, Peer>();
 
+// Peers for proxies whose window this side does not know yet. A call for a
+// handle one of them holds can arrive from the real window before that
+// window is known here (the proxy's window was set in another window); the
+// handle finds the peer, and authorization matches the caller to the proxy.
+const unresolvedProxyPeers = new Set<Peer>();
+
 // A ZalgoPromise as a native one, which is what sandestin's hooks return.
 const native = <T>(promise : PromiseLike<T>) : Promise<T> => new Promise((resolve, reject) => {
     promise.then(resolve, reject);
@@ -99,10 +105,13 @@ export const getPeer = (winOrProxyWin : Window | ProxyWindow, { send } : Pick<Tr
         const peer = createPeer(win, { send });
 
         proxyPeers.set(win, peer);
+        unresolvedProxyPeers.add(peer);
 
         // Once the real window is known, calls coming back from it must find
         // this peer as well as any the window already has.
         win.awaitWindow().then(actualWin => {
+            unresolvedProxyPeers.delete(peer);
+
             const list = peers.getOrSet(actualWin, () => []);
 
             if (!list.includes(peer)) {
@@ -141,7 +150,9 @@ const getPeerForHandle = ({ source, handle, send } : GetPeerForHandleOptions) : 
 
     const peers = windowStore<Array<Peer>>('sandestinPeers').get(source) ?? [];
 
-    return peers.find(peer => peer.serdes.hasHandle({ handle })) ?? first;
+    return peers.find(peer => peer.serdes.hasHandle({ handle })) ??
+        [ ...unresolvedProxyPeers ].find(peer => peer.serdes.hasHandle({ handle })) ??
+        first;
 };
 
 type HandleRequest = {

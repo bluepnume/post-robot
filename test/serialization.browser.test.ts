@@ -60,9 +60,11 @@ describe('functions', () => {
     it('calls a function instantly when it comes back to its origin window', async () => {
         const { childFrame } = getWindows();
         let actualArgument : unknown;
+        let caller : { source ?: unknown, origin ?: unknown } | undefined;
 
-        const myfunction = (val : unknown) : string => {
+        const myfunction = function (this : { source : unknown, origin : unknown }, val : unknown) : string {
             actualArgument = val;
+            caller = { source: this.source, origin: this.origin };
 
             return 'hello world';
         };
@@ -74,6 +76,10 @@ describe('functions', () => {
 
         expect(actualArgument).toBe(567);
         expect(await promise).toBe('hello world');
+
+        // A local call: `this` is this window, not the one the function came back from.
+        expect(caller?.source).toBe(window);
+        expect(caller?.origin).toBe(location.origin);
     });
 
     it('calls a function with the calling window and its origin as this', async () => {
