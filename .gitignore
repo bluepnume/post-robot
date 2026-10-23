@@ -1,5 +1,9 @@
-node_modules
-npm-debug.log
-coverage
-flow-typed
-package-lock.json
+node_modules/
+dist/
+coverage/
+.tsbuildinfo
+.eslintcache
+*.log
+*.tgz
+.DS_Store
+.vitest/

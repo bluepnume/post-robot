@@ -1,289 +1,76 @@
-# post-robot [:]-\\-<
+# post-robot
 
-[![build status][build-badge]][build]
-[![code coverage][coverage-badge]][coverage]
-[![npm version][version-badge]][package]
+Cross-window messaging over `postMessage`: send a request to another window, iframe or popup and get a response; hand functions, promises and windows across and keep using them from the other side.
 
-[build-badge]: https://img.shields.io/github/actions/workflow/status/krakenjs/post-robot/main.yaml?branch=main&logo=github&style=flat-square
-[build]: https://github.com/krakenjs/post-robot/actions?query=workflow%3Abuild
-[coverage-badge]: https://img.shields.io/codecov/c/github/krakenjs/post-robot.svg?style=flat-square
-[coverage]: https://codecov.io/github/krakenjs/post-robot/
-[version-badge]: https://img.shields.io/npm/v/post-robot.svg?style=flat-square
-[package]: https://www.npmjs.com/package/post-robot
-
-Cross domain post-messaging on the client side, using a simple listener/client pattern.
-
-Send a message to another window, and:
-
-- [Get a response](#simple-listener-and-sender-with-error-handling) from the window you messaged
-- [Pass functions](#functions) to another window, across different domains
-- [Handle any errors](#simple-listener-and-sender-with-error-handling) that prevented your message from getting through
-- Don't worry about serializing your messages; [just send javascript objects](#simple-listener-and-sender-with-error-handling)
-- Use [promises](#listener-with-promise-response) or [async/await](#async--await) to wait for responses from windows you message
-- Set up a [secure message channel](#secure-message-channel) between two windows on a certain domain
-- Send messages between a [parent and a popup window](#parent-to-popup-messaging) in IE
-
-## Serialization
-
-post-robot will serialize and deserialize the following data types in messages:
-
-- Objects, arrays, strings, numbers, booleans, null
-  - Note: this includes any JSON-serializable types
-- Functions
-  - Note: the function passed will be a [reference to the original function](#functions), and the deserialized function will always return a `Promise` - specifically a [`ZalgoPromise`](https://github.com/krakenjs/zalgo-promise)
-- Promises
-  - Note: deserialized promises will be instances of [`ZalgoPromise`](https://github.com/krakenjs/zalgo-promise)
-- Error objects
-  - e.g. `new Error("This error will self-destruct in 10, 9, 8...")`
-- Regex objects
-  - e.g. `/[a-zA-Z0-9]*/`
-
-## Simple listener and sender
-
-```javascript
-// Set up a listener
-
-postRobot.on("getUser", function (event) {
-  // Have it return some data to the calling window
-
-  return {
-    id: 1234,
-    name: "Zippy the Pinhead",
-
-    // Yep, we're even returning a function to the other window!
-
-    logout: function () {
-      return $currentUser.logout();
-    },
-  };
-});
+```sh
+npm install post-robot
 ```
 
-```javascript
-// Call the listener, on a different window, on a different domain
+```ts
+import { on, send } from 'post-robot';
 
-postRobot
-  .send(someWindow, "getUser", { id: 1337 })
-  .then(function (event) {
-    var user = event.data;
+// In the child
+on('getUser', ({ data }) => fetchUser(data.id));
 
-    console.log(event.source, event.origin, "Got user:", user);
-
-    // Call the user.logout function from the other window!
-
-    user.logout();
-  })
-  .catch(function (err) {
-    // Handle any errors that stopped our call from going through
-
-    console.error(err);
-  });
+// In the parent
+const { data: user } = await send(childFrame, 'getUser', { id: '123' });
 ```
 
-## Listener with promise response
+ES modules, TypeScript types included, ES2019 syntax. For current browsers (Chrome, Firefox, Safari, Edge from 2024 on): the floor is the four APIs sandestin needs, `FinalizationRegistry`, `WeakRef`, `AbortSignal.any` and `crypto.randomUUID`, and post-robot adds nothing above it. A `dist/post-robot.min.js` bundle is included for pages that load it with a script tag, as `window.postRobot`.
 
-```javascript
-postRobot.on("getUser", function (event) {
-  return getUser(event.data.id).then(function (user) {
-    return {
-      name: user.name,
-    };
-  });
-});
-```
+## Sending and receiving
 
-## One-off listener
+`send(window, name, data?, options?)` posts a request and resolves with `{ source, origin, data }` once the other side's handler has run. Before the first message to a window post-robot waits for it to say hello (every window running post-robot does, to its opener or parent), so a request is never fired into a frame that has not loaded yet. Every request is acknowledged on arrival and answered when its handler settles; no acknowledgement within two seconds (ten for a window already heard from) rejects with "no ack", a closed window rejects at once, and `options.timeout` bounds the wait for the response itself.
 
-```javascript
-postRobot.once("getUser", function (event) {
-  return {
-    name: "Noggin the Nog",
-  };
-});
-```
+| Option | Does |
+| --- | --- |
+| `domain` | The origin the window must be at: a string, a RegExp, a list of either, or `*` (the default). A string is also what the message is posted to |
+| `timeout` | Milliseconds to wait for the response; `-1`, the default, waits forever |
+| `fireAndForget` | Post it and resolve immediately; no acknowledgement, no response |
 
-## Cancelling a listener
+`on(name, options?, handler)` registers the handler for a request name and returns `{ cancel }`. The handler gets `{ source, origin, data }` and whatever it returns, or resolves with, is the response; a throw or rejection is the error the sender's promise rejects with. Registering the same name twice for the same window and domain throws.
 
-```javascript
-var listener = postRobot.on("getUser", function (event) {
-  return {
-    id: event.data.id,
-    name: "Zippy the Pinhead",
-  };
-});
+| Option | Does |
+| --- | --- |
+| `window` | Only accept the request from this window, or from any of these |
+| `domain` | Only accept it from an origin matching this |
+| `errorHandler` | Where a handler's error goes, instead of being rethrown |
 
-listener.cancel();
-```
+`once(name, options?, handler?)` is `on` for a single request: it resolves with the event and stops listening, and has `.cancel()`.
 
-## Listen for messages from a specific window
+## What crosses
 
-```javascript
-postRobot.on("getUser", { window: window.parent }, function (event) {
-  return {
-    name: "Guybrush Threepwood",
-  };
-});
-```
+Data crosses by value, through [sandestin](https://github.com/bluepnume/sandestin): objects, arrays, strings, numbers, dates, maps, sets, typed arrays, `undefined`, cycles, and errors with their name, message, code and stack. Three things cross by reference:
 
-## Listen for messages from a specific domain
+- **Functions.** The other side gets a function that calls the original where it lives and resolves with its result. It has `.fireAndForget(...)` for a call that needs no reply. Inside the original, `this.source` and `this.origin` are the calling window and its origin. A function handed back to the window it came from is the original again, called directly.
+- **Promises.** Native promises and [ZalgoPromises](https://github.com/bluepnume/zalgo-promise) both cross; the other side gets a promise that settles when the original does.
+- **Windows.** A window crosses as a `ProxyWindow`: an object with `close`, `focus`, `isClosed`, `getType`, `setLocation`, `getName`, `setName` and `getInstanceID` that act on the real window where it lives, and that becomes the real window again when it turns out to be reachable from the receiving side. That is what lets a parent describe windows to a child before the child exists.
 
-```javascript
-postRobot.on("getUser", { domain: "http://zombo.com" }, function (event) {
-  return {
-    name: "Manny Calavera",
-  };
-});
-```
+Every function and promise handed out is bound to the origin it was sent to; a call for it from a window that has since navigated elsewhere is refused.
 
-## Set a timeout for a response
+Promises returned by `send`, `once` and the functions above are `ZalgoPromise`s: they settle synchronously when they can, which keeps a chain inside a user gesture and avoids microtask lag in a background window. `await` works on them.
 
-```javascript
-postRobot
-  .send(someWindow, "getUser", { id: 1337 }, { timeout: 5000 })
-  .then(function (event) {
-    console.log(event.source, event.origin, "Got user:", event.data.name);
-  })
-  .catch(function (err) {
-    console.error(err);
-  });
-```
+## The rest of the API
 
-## Send a message to a specific domain
+| Export | Does |
+| --- | --- |
+| `setup()` | Start listening and say hello to the opener or parent. `on` and `send` run it; call it in a window that only needs to be reachable |
+| `destroy()` | Stop listening and drop every pending request |
+| `cleanUpWindow(win)` | Fail every request still waiting on a window that is going away |
+| `markWindowKnown(win)` | Treat a window as one that will acknowledge, before it has sent anything |
+| `awaitWindowHello(win, timeout?, name?)` | Resolves with `{ domain }` once the window has said hello |
+| `serializeMessage(win, domain, value)` / `deserializeMessage(win, origin, text)` | Encode a value for a window the way a message would, to carry it another way (in a url, say) |
+| `createProxyWindow(win?)` / `toProxyWindow(win)` | Make, or look up, the `ProxyWindow` for a window |
+| `ZalgoPromise`, `ProxyWindow`, `GLOBAL_KEY`, `MAJOR_VERSION`, `MESSAGE_NAME`, `WILDCARD` | The pieces above, and the constants |
 
-```javascript
-postRobot
-  .send(someWindow, "getUser", { id: 1337 }, { domain: "http://zombo.com" })
-  .then(function (event) {
-    console.log(event.source, event.origin, "Got user:", event.data.name);
-  });
-```
+## Two copies on one page
 
-## Async / Await
+All of post-robot's state hangs off one window property keyed by major version, `window.__post_robot_12__`, and every message is tagged with that key. Two copies of the same major on one page share one listener, one set of handlers and one hello table, so a page with two libraries built on post-robot does not double-handle or drop messages. Two copies of different majors ignore each other's messages.
 
-```javascript
-postRobot.on("getUser", async ({ source, origin, data }) => {
-  let user = await getUser(data.id);
+## Changes in 12
 
-  return {
-    id: data.id,
-    name: user.name,
-  };
-});
-```
+Published as `post-robot` again (8 to 11 lived under `@krakenjs`). ES modules and TypeScript only. The serialization layer is sandestin. Gone, because no supported browser needs them: the Internet Explorer popup bridge (`bridge.*`, `openBridge`, `linkWindow`, `linkUrl`), the global-messaging fallback for IE11 and legacy Edge, the user-agent sniffing, the `.ie.js` builds and the `__POST_ROBOT__` build flags, the `mock://` domain test hooks, and the CommonJS entry point. Dependencies: `zalgo-promise` 3, `cross-domain-utils` 4 and `sandestin`; `belter`, `cross-domain-safe-weakmap` and `universal-serialize` are no longer used. Importing post-robot has no side effects: listeners start on the first `on` or `send`, or on `setup()`. The global key is now the major version rather than the exact version, so patch and minor releases on one page share a channel.
 
-```javascript
-try {
-  let { source, origin, data } = await postRobot.send(someWindow, `getUser`, {
-    id: 1337,
-  });
-  console.log(source, origin, "Got user:", data.name);
-} catch (err) {
-  console.error(err);
-}
-```
+## License
 
-## Secure Message Channel
-
-For security reasons, it is recommended that you always explicitly specify the window and domain you want to listen
-to and send messages to. This creates a secure message channel that only works between two windows on the specified domain:
-
-```javascript
-postRobot.on(
-  "getUser",
-  { window: childWindow, domain: "http://zombo.com" },
-  function (event) {
-    return {
-      id: event.data.id,
-      name: "Frodo",
-    };
-  }
-);
-```
-
-```javascript
-postRobot
-  .send(someWindow, "getUser", { id: 1337 }, { domain: "http://zombo.com" })
-  .then(function (event) {
-    console.log(event.source, event.origin, "Got user:", event.data.name);
-  })
-  .catch(function (err) {
-    console.error(err);
-  });
-```
-
-## Functions
-
-Post robot lets you send across functions in your data payload, fairly seamlessly.
-
-For example:
-
-```javascript
-postRobot.on("getUser", function (event) {
-  return {
-    id: event.data.id,
-    name: "Nogbad the Bad",
-
-    logout: function () {
-      currentUser.logout();
-    },
-  };
-});
-```
-
-```javascript
-postRobot.send(myWindow, "getUser", { id: 1337 }).then(function (event) {
-  var user = event.data;
-
-  user.logout().then(function () {
-    console.log("User was logged out");
-  });
-});
-```
-
-The function `user.logout()` will be called on the **original** window. Post Robot transparently messages back to the
-original window, calls the function that was passed, then messages back with the result of the function.
-
-Because this uses post-messaging behind the scenes and is therefore always async, `user.logout()` will **always** return a promise, and must be `.then`'d or `await`ed.
-
-## Parent to popup messaging
-
-Unfortunately, IE blocks direct post messaging between a parent window and a popup, on different domains.
-
-In order to use post-robot in IE9+ with popup windows, you will need to set up an invisible 'bridge' iframe on your parent page:
-
-```
-   [ Parent page ]
-
-+---------------------+          [ Popup ]
-|        xx.com       |
-|                     |      +--------------+
-|  +---------------+  |      |    yy.com    |
-|  |    [iframe]   |  |      |              |
-|  |               |  |      |              |
-|  | yy.com/bridge |  |      |              |
-|  |               |  |      |              |
-|  |               |  |      |              |
-|  |               |  |      |              |
-|  |               |  |      +--------------+
-|  +---------------+  |
-|                     |
-+---------------------+
-```
-
-a. Use the special `ie` build of post-robot: `dist/post-robot.ie.js`.
-
-b. Create a bridge path on the domain of your popup, for example `http://yy.com/bridge.html`, and include post-robot:
-
-```html
-<script src="http://yy.com/js/post-robot.ie.js"></script>
-```
-
-c. In the parent page on `xx.com` which opens the popup, include the following javascript:
-
-```html
-<script>
-  postRobot.bridge.openBridge("http://yy.com/bridge.html");
-</script>
-```
-
-Now `xx.com` and `yy.com` can communicate freely using post-robot, in IE.
+Apache-2.0

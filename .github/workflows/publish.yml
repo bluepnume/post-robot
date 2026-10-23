@@ -1,35 +1,34 @@
-# manually run this action using the GitHub UI
-# https://github.blog/changelog/2020-07-06-github-actions-manual-triggers-with-workflow_dispatch/
-name: publish to npm
-on: workflow_dispatch
+name: Publish
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
-  main:
+  publish:
     runs-on: ubuntu-latest
     steps:
-      - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          ref: ${{ github.head_ref }}
-
-      - name: ⎔ Setup node
-        # sets up the .npmrc file to publish to npm
-        uses: actions/setup-node@v3
-        with:
-          node-version: "16"
-          registry-url: "https://registry.npmjs.org"
-
-      - name: 📥 Download deps
-        uses: bahmutov/npm-install@v1
-        with:
-          useLockFile: false
-
-      - name: Configure git user
+          node-version-file: .nvmrc
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+      - name: Check the tag matches package.json
         run: |
-          git config --global user.email ${{ github.actor }}@users.noreply.github.com
-          git config --global user.name ${{ github.actor }}
-      - name: 📦 Publish to npm using existing scripts
-        run: npm run release
-        env:
-          # actions/setup-node uses this NODE_AUTH_TOKEN environment variable for npm publishing
-          # https://docs.github.com/en/actions/tutorials/publish-packages/publish-nodejs-packages
-          NODE_AUTH_TOKEN: ${{ secrets.KRAKENJS_PAYPAL_SDK_NPM_AUTH_TOKEN }}
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="$(node -p 'require("./package.json").version')"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "Tag v$TAG does not match package.json version $VERSION" >&2
+            exit 1
+          fi
+      # Trusted publishing: no NODE_AUTH_TOKEN. Enable it once for this package
+      # name on npmjs.com (Settings > Trusted Publisher: this repo, publish.yml).
+      - run: npm publish --provenance --access public

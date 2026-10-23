@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [12.0.0](https://github.com/bluepnume/post-robot/compare/v11.0.1...v12.0.0) (2026-10-22)
+
+### ⚠ BREAKING CHANGES
+
+* published as `post-robot` (unscoped) again; ES modules and TypeScript only; no CommonJS entry
+* serialization is now [sandestin](https://github.com/bluepnume/sandestin); `@krakenjs/universal-serialize` is gone
+* removed the IE popup bridge (`bridge` export, `openBridge`, `linkWindow`, `linkUrl`, `openTunnelToOpener`), the global-messaging fallback, `compat`, user-agent sniffing, the `.ie.js` bundles and all `__POST_ROBOT__` build flags
+* removed `mockDomain` / `mock://` test hooks
+* importing has no side effects: `setup()` runs on the first `on` or `send`, or call it directly
+* the global key is `__post_robot_12__` (major version), not the exact version
+* `ZalgoPromise` is exported under its own name (the `Promise` alias is gone)
+* dependencies: `zalgo-promise` ^3, `cross-domain-utils` ^4, `sandestin`; `belter` and `cross-domain-safe-weakmap` are no longer used
+
+* functions handed out are bound to the origin they were sent to; calls from elsewhere are refused
+* `fireAndForget` function calls send no reply at all
+* one minified script-tag bundle, `dist/post-robot.min.js`, as `window.postRobot`
+* tests run in a real browser against same-origin and cross-origin frames and popups
+
 ### 11.0.1 (2026-09-14)
 
 
