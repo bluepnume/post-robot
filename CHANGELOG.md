@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [12.2.1](https://github.com/bluepnume/post-robot/compare/v12.2.0...v12.2.1) (2026-10-24)
+
+* sending to a child window that loaded before this window used post-robot no longer waits for a hello that was never coming: post-robot asks the child for one
+* `cleanUpWindow` fails every request pending on the window, not just the first
+
 ## [12.2.0](https://github.com/bluepnume/post-robot/compare/v12.1.0...v12.2.0) (2026-10-23)
 
 * sandestin 0.5.0: a function sent to the same window twice is one proxy there, and a release says how many sends it covers, so collecting one copy no longer breaks another still in use. Peers on 12.1 and earlier send no count, which releases outright as before

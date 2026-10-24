@@ -69,6 +69,20 @@ export const initHello = ({ on, send } : Transport) : Cancelable =>
         return listener;
     });
 
+// A child that loaded before this window started listening said its hello
+// to nobody, and will not say it again. Ask it once; a child that has not
+// loaded yet ignores the request and says hello itself when it does.
+export const requestHello = (win : Window, { send } : Pick<Transport, 'send'>) : void => {
+    const requested = windowStore<boolean>('helloRequested');
+
+    if (getHelloPromise(win).resolved || requested.has(win)) {
+        return;
+    }
+
+    requested.set(win, true);
+    sayHello(win, { send }).catch(noop);
+};
+
 // Resolves once the window has said hello, with its origin; rejects after
 // `timeout` milliseconds (-1 waits forever).
 export const awaitWindowHello = (win : Window, timeout = 5000, name = 'Window') : ZalgoPromise<Hello> => {

@@ -75,6 +75,30 @@ describe('lifecycle', () => {
         cleanUpWindow(createIframe({ src: 'about:blank' }));
     });
 
+    it('cleanUpWindow fails every pending request, not just the first', async () => {
+        const frame = createIframe({ src: childPage });
+
+        await send(frame, 'setupListener', {
+            messageName: 'hang3',
+
+            handler: () => new Promise(() => {
+                // never settles
+            })
+        });
+
+        const first = send(frame, 'hang3');
+        const second = send(frame, 'hang3');
+
+        await new Promise(resolve => {
+            setTimeout(resolve, 50);
+        });
+
+        cleanUpWindow(frame);
+
+        expect((await expectError(first) as Error).message).toMatch(/cleaned up before response/u);
+        expect((await expectError(second) as Error).message).toMatch(/cleaned up before response/u);
+    });
+
     it('cleanUpWindow says closed for a window that is', async () => {
         const frame = createIframe({ src: childPage });
 

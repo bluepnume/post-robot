@@ -2,7 +2,7 @@ import { getDomain, isAncestor, isWindowClosed, matchDomain, stringifyDomainPatt
 import { ZalgoPromise } from 'zalgo-promise';
 
 import { ACK_TIMEOUT, ACK_TIMEOUT_KNOWN, CHILD_WINDOW_TIMEOUT, RES_TIMEOUT, RESPONSE_CYCLE_TIME } from './config';
-import { MESSAGE_TYPE, WILDCARD } from './constants';
+import { MESSAGE_NAME, MESSAGE_TYPE, WILDCARD } from './constants';
 
 /* eslint-disable @typescript-eslint/max-params -- `send(win, name, data, options)` and `on(name, options, handler)` are the API every caller is written against */
 import type { ResponseListener } from './listeners';
@@ -12,7 +12,7 @@ import type {
 } from './types';
 
 import { deleteGlobal, getGlobal, globalStore, windowStore } from './global';
-import { awaitWindowHello, initHello, sayHello } from './hello';
+import { awaitWindowHello, initHello, requestHello, sayHello } from './hello';
 import { noop, safeInterval, stringifyError, uniqueID } from './helpers';
 import { isWindowKnown } from './known-windows';
 import {
@@ -253,9 +253,15 @@ const api : Api = {
         return ProxyWindow.toProxyWindow(winOrProxyWin, transport).awaitWindow().then(win => ZalgoPromise.try(() => {
             validateOptions(name, win, options.domain);
 
-            return isAncestor(window, win)
-                ? awaitWindowHello(win, childTimeout)
-                : undefined;
+            // A hello is itself how a child's hello is asked for, so it never
+            // waits for one.
+            if (!isAncestor(window, win) || name === MESSAGE_NAME.HELLO) {
+                return undefined;
+            }
+
+            requestHello(win, { send: api.send });
+
+            return awaitWindowHello(win, childTimeout);
         }).then(hello => normalizeDomain({
             win,
             targetDomain: domainMatcher,
